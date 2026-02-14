@@ -1,4 +1,9 @@
 #合并后的文档中每个源 Word 文档的内容独立占一页（而非所有内容连续紧挨着）
+'''
+豆包话术：
+用Python 3.8.7实现合并多个word内容到一个word里面。合并内容包括图片，文字，数字和表格（保留原来格式），并且生成一个GUI界面进行操作。
+
+'''
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext
 import os
