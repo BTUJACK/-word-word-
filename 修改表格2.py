@@ -1,3 +1,16 @@
+'''
+用Python 3.8.7实现批量修改一个文件夹里面的.docx文件，并且生成一个GUI界面进行操作。
+删除“Test Report”；
+删除每个文档中的第一个表格；
+“Final_Result”替换为“试验结果图:”；
+“Frequency”替换为“频率”；
+“QuasiPeak”替换为“准峰值”；
+“Margin”替换为“裕量”；
+“Limit”替换为“限值”；
+删除表格的第5列到第9列；
+交换表格第3列和第4列的内容；
+
+'''
 import os
 import tkinter as tk
 from tkinter import filedialog, scrolledtext, messagebox
