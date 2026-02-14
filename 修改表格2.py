@@ -94,7 +94,7 @@ class DocxBatchProcessor:
                 
             # 3. 批量替换文本
             replace_pairs = {
-                "Final_Result": "试验结果图:",
+                "Final_Result": "",
                 "Frequency": "频率",
                 "QuasiPeak": "准峰值",
                 "Margin": "裕量",
