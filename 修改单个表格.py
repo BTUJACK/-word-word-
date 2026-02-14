@@ -1,5 +1,5 @@
 '''
-用Python 3.8.7实现批量修改一个文件夹里面的.docx文件，并且生成一个GUI界面进行操作。
+用Python 3.8.7实现修改一个.docx文件，并且生成一个GUI界面进行操作。
 删除“Test Report”；
 删除每个文档中的第一个表格；
 删除“Final_Result”
