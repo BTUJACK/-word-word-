@@ -5,10 +5,11 @@ Docx批量处理工具 - 表格图片调整
 Python 3.8.7 + python-docx 0.8.11
 核心功能：
 1. 批量处理文件夹内所有docx文件
-2. 强制显示表格所有边框（黑色0.5磅实线）
-3. 表格移至图片上方，与图片间隔3行
+2. 
+3. 表格移至图片上方，位于第5行
 4. 图片左上角标注：试验结果图：
 5. 图片下方中间标注：水平极化
+6. 
 """
 import os
 import shutil
@@ -81,7 +82,7 @@ class DocxBatchTool:
         self.log_text.insert(tk.END, f"{msg}\n")
         self.log_text.see(tk.END)
         self.root.update_idletasks()
-
+    '''
     def _set_cell_border(self, cell):
         """为单元格设置完整黑色边框（0.5磅实线）"""
         try:
@@ -110,7 +111,8 @@ class DocxBatchTool:
             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
         except Exception as e:
             self._log(f"  ⚠️  单元格边框设置失败：{str(e)}")
-
+    '''
+    '''
     def _apply_table_borders(self, table):
         """为整个表格的所有单元格添加边框"""
         try:
@@ -120,7 +122,7 @@ class DocxBatchTool:
             self._log("  ✅ 表格边框已全部显示（黑色0.5磅实线）")
         except Exception as e:
             self._log(f"  ⚠️  表格边框设置失败：{str(e)}")
-
+    '''
     def _find_first_image(self, doc):
         """精准定位文档中第一个图片的段落（支持所有图片格式）"""
         self._log("  🔍 开始定位图片...")
@@ -214,11 +216,12 @@ class DocxBatchTool:
             
             # 3. 处理表格边框
             table = doc.tables[0] if doc.tables else None
+            '''
             if table:
                 self._apply_table_borders(table)
             else:
                 self._log("  ⚠️  文档中无表格，跳过边框设置")
-            
+            '''
             # 4. 定位图片
             img_para = self._find_first_image(doc)
             
