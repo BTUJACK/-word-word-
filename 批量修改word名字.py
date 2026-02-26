@@ -1,3 +1,13 @@
+'''
+用Python 3.8.7实现把一个文件夹里面的.docx文件批量修改名字, 并且生成一个GUI界面进行操作：
+“M1_”移动到“P1_”后面；
+“M2_”移动到“P1_”后面；
+“M3_”移动到“P1_”后面；
+“M4_”移动到“P1_”后面；
+“M5_”移动到“P1_”后面；
+“Ambient_”移动到“P1_”后面；
+'''
+
 import tkinter as tk
 from tkinter import messagebox, filedialog
 import os
