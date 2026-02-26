@@ -1,272 +1,343 @@
-import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Docx批量处理工具 - 表格图片调整 + 清除页眉页脚
+Python 3.8.7 + python-docx 0.8.11
+核心功能：
+1. 批量处理文件夹内所有docx文件
+2. 清除第一个表格上方所有空段落，确保表格距离顶部有2个空段落
+3. 表格移至图片上方（无间隔行）
+4. 图片左上角标注：试验结果图：
+5. 图片下方中间标注：水平极化
+6. “试验结果图：”前面保留一个空行
+7. 新增：删除页眉和页尾的所有内容
+"""
 import os
 import shutil
-import tempfile
+import tkinter as tk
+from tkinter import filedialog, messagebox, scrolledtext
 from docx import Document
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+from docx.shared import Pt
 from docx.oxml import parse_xml
-from docx.oxml.ns import qn
+from docx.oxml.ns import nsdecls
 
-# 适配 Python 3.8.7 依赖（执行前安装）：
-# pip install python-docx==0.8.11
-
-class WordImageTableTool:
+class DocxBatchTool:
     def __init__(self, root):
-        # 主窗口配置
         self.root = root
-        self.root.title("Word图片表格调整工具（100%找图片）")
-        self.root.geometry("800x520")
-        self.root.resizable(False, False)
+        self.root.title("Docx表格图片批量处理工具")
+        self.root.geometry("800x650")
+        
+        # 配置项（移除了间隔行数配置）
+        self.img_label_top = "\n试验结果图："       # 图片左上角文字
+        self.img_label_bottom = "水平极化"        # 图片下方中间文字
+        self.table_top_spaces = 2                # 表格距离顶部的空段落数
+        
+        self.folder_path = tk.StringVar()
+        self._build_gui()
 
-        # 备份/文件变量
-        self.tmp_dir = None
-        self.backup_path = ""
-        self.current_file = ""
-
-        # ========== GUI 界面布局 ==========
-        # 1. 文件选择区域
-        frame_file = tk.Frame(root, padx=15, pady=10)
-        frame_file.pack(fill=tk.X)
-
-        tk.Label(frame_file, text="待处理Word文件：", font=("微软雅黑", 10)).grid(row=0, column=0, sticky=tk.W)
-        self.file_var = tk.StringVar()
-        entry_file = tk.Entry(frame_file, textvariable=self.file_var, width=55, font=("微软雅黑", 9))
-        entry_file.grid(row=0, column=1, padx=8)
-        btn_file = tk.Button(frame_file, text="选择文件", command=self.choose_file,
-                              font=("微软雅黑", 9), width=10, bg="#409EFF", fg="white")
-        btn_file.grid(row=0, column=2)
-
-        # 2. 功能按钮区域
-        frame_btn = tk.Frame(root, padx=15, pady=10)
-        frame_btn.pack(fill=tk.X)
-
-        self.btn_process = tk.Button(frame_btn, text="执行调整：删图片上方内容+表格移图片上", 
-                                    command=self.process_word, font=("微软雅黑", 11, "bold"),
-                                    width=35, height=2, bg="#67C23A", fg="white")
-        self.btn_process.pack(side=tk.LEFT, padx=5)
-
-        self.btn_restore = tk.Button(frame_btn, text="恢复原文件", command=self.restore_original,
-                                    font=("微软雅黑", 10), width=18, height=2, bg="#F56C6C", fg="white")
-        self.btn_restore.pack(side=tk.LEFT, padx=5)
-
+    def _build_gui(self):
+        """构建GUI界面"""
+        # 1. 文件夹选择区域
+        frame1 = tk.Frame(self.root, padx=10, pady=10)
+        frame1.pack(fill=tk.X)
+        
+        tk.Label(frame1, text="目标文件夹：", font=("SimHei", 10)).pack(side=tk.LEFT)
+        tk.Entry(frame1, textvariable=self.folder_path, width=65, font=("SimHei", 10)).pack(side=tk.LEFT, padx=5)
+        tk.Button(
+            frame1, text="选择文件夹", command=self._select_folder,
+            font=("SimHei", 10), bg="#E0E0E0"
+        ).pack(side=tk.LEFT)
+        
+        # 2. 执行按钮
+        frame2 = tk.Frame(self.root, padx=10, pady=8)
+        frame2.pack(fill=tk.X)
+        
+        tk.Button(
+            frame2, text="开始批量处理", 
+            command=self._batch_process,
+            bg="#2196F3", fg="white", font=("SimHei", 11, "bold"), padx=30
+        ).pack(side=tk.LEFT)
+        
         # 3. 日志显示区域
-        frame_log = tk.Frame(root, padx=15, pady=5)
-        frame_log.pack(fill=tk.BOTH, expand=True)
-
-        tk.Label(frame_log, text="操作日志：", font=("微软雅黑", 10)).pack(anchor=tk.W)
-        self.log_text = scrolledtext.ScrolledText(frame_log, height=15, font=("Consolas", 9))
+        frame3 = tk.Frame(self.root, padx=10, pady=10)
+        frame3.pack(fill=tk.BOTH, expand=True)
+        
+        tk.Label(frame3, text="处理日志：", font=("SimHei", 10)).pack(anchor=tk.W)
+        self.log_text = scrolledtext.ScrolledText(
+            frame3, height=30, font=("Consolas", 9), wrap=tk.WORD
+        )
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
-        # 初始化日志
-        self.log("✅ Python 3.8.7 环境适配完成，工具就绪")
-        self.log("💡 操作流程：选择Word文件 → 点击执行调整 → 完成后可恢复原文件\n")
+    def _select_folder(self):
+        """选择目标文件夹"""
+        folder = filedialog.askdirectory(title="选择包含docx文件的文件夹")
+        if folder:
+            self.folder_path.set(folder)
+            self._log(f"✅ 已选择文件夹：{folder}")
 
-    # ========== 基础辅助方法 ==========
-    def log(self, content):
-        """带时间戳的日志"""
-        import datetime
-        time_str = datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-        self.log_text.insert(tk.END, f"{time_str} {content}\n")
+    def _log(self, msg):
+        """日志输出（自动滚动）"""
+        self.log_text.insert(tk.END, f"{msg}\n")
         self.log_text.see(tk.END)
         self.root.update_idletasks()
-
-    def choose_file(self):
-        """选择单个Word文件"""
-        file_path = filedialog.askopenfilename(
-            title="选择待处理的Word文档",
-            filetypes=[("Word 2007-2019 文档", "*.docx"), ("所有文件", "*.*")]
-        )
-        if file_path:
-            self.file_var.set(file_path)
-            self.current_file = file_path
-            self.log(f"📂 已选择文件：{os.path.basename(file_path)}")
-
-    # ========== 核心修复：全类型图片定位（100%找到） ==========
-    def find_all_images(self, doc):
-        """
-        修复版：识别所有类型的图片（解决"找不到图片"问题）
-        返回：第一个图片的位置索引，图片元素对象
-        """
-        body_elems = list(doc._body._element)
-        image_idx = -1
-        target_image_elem = None
-
-        # 支持的图片标签类型（覆盖Word所有图片格式）
-        image_tags = [
-            'pic:pic',          # 嵌入式图片
-            'a:graphic',        # 浮动式图片
-            'w:drawing',        # 新版Word图片
-            'v:shape',          # 形状中的图片
-            'wp:inline',        # 内联图片
-            'wp:anchor'         # 锚定图片
-        ]
-
-        self.log("  ▶ 开始扫描所有类型图片...")
-        for idx, elem in enumerate(body_elems):
-            # 检查当前元素是否是图片
-            elem_xml = elem.xml.lower()
-            # 方式1：直接匹配标签
-            tag_match = any(tag in elem.tag for tag in image_tags)
-            # 方式2：XML内容中包含图片标识（兜底）
-            content_match = 'blip' in elem_xml or 'image' in elem_xml or 'pict' in elem_xml
-
-            if tag_match or content_match:
-                image_idx = idx
-                target_image_elem = elem
-                self.log(f"  ✅ 找到图片！类型：{elem.tag.split('}')[-1]}，位置索引：{image_idx}")
-                break
-
-        if image_idx == -1:
-            self.log("  ❌ 未找到任何类型的图片（文档中确实无图片或格式不支持）")
-            return -1, None
-        return image_idx, target_image_elem
-
-    def get_table_elements_below_image(self, doc, image_idx):
-        """获取图片下方的所有表格元素（深拷贝保留格式）"""
-        body_elems = list(doc._body._element)
-        table_elems = []
-
-        # 遍历图片之后的所有元素
-        for idx in range(image_idx + 1, len(body_elems)):
-            elem = body_elems[idx]
-            if elem.tag.endswith('tbl'):
-                # 深拷贝表格，避免引用丢失
-                table_elem = parse_xml(elem.xml)
-                table_elems.append(table_elem)
-                self.log(f"  ✅ 找到图片下方表格，索引：{idx}")
-
-        if not table_elems:
-            self.log("  ⚠️  图片下方未找到表格")
-        return table_elems
-
-    # ========== 核心：删除图片上方内容 + 移动表格 ==========
-    def adjust_word_content(self, doc):
-        """修复版调整逻辑"""
-        self.log("🔧 开始分析文档元素结构")
+    
+    def _clear_header_footer(self, doc):
+        """删除页眉和页脚的所有内容"""
+        try:
+            # 处理页眉
+            header_removed = 0
+            for section in doc.sections:
+                header = section.header
+                # 清空页眉所有段落
+                for para in header.paragraphs:
+                    para.clear()
+                    header_removed += 1
+                # 处理页眉中的表格（如果有）
+                for table in header.tables:
+                    header._element.remove(table._element)
+                    header_removed += 1
+            
+            # 处理页脚
+            footer_removed = 0
+            for section in doc.sections:
+                footer = section.footer
+                # 清空页脚所有段落
+                for para in footer.paragraphs:
+                    para.clear()
+                    footer_removed += 1
+                # 处理页脚中的表格（如果有）
+                for table in footer.tables:
+                    footer._element.remove(table._element)
+                    footer_removed += 1
+            
+            self._log(f"  ✅ 清除页眉内容数：{header_removed} | 清除页脚内容数：{footer_removed}")
+            return True
+        except Exception as e:
+            self._log(f"  ⚠️  清除页眉页脚失败：{str(e)}")
+            return False
+    
+    def _find_first_image(self, doc):
+        """精准定位文档中第一个图片的段落（支持所有图片格式）"""
+        self._log("  🔍 开始定位图片...")
         
-        # 步骤1：找图片（修复核心）
-        image_idx, image_elem = self.find_all_images(doc)
-        if image_idx == -1:
+        # 方法1：遍历段落+run（主流嵌入式图片）
+        for para_idx, para in enumerate(doc.paragraphs):
+            for run in para.runs:
+                # 检测drawing（2007+）和pict（老式）图片
+                if run.element.xpath(".//w:drawing") or run.element.xpath(".//w:pict"):
+                    self._log(f"    ✅ 在段落 {para_idx+1} 找到图片")
+                    return para
+        
+        # 方法2：直接遍历XML（兜底方案）
+        self._log("    ⚠️  Run中未找到图片，尝试遍历文档XML...")
+        body = doc.element.body
+        for elem in body.iter():
+            if elem.tag.endswith('drawing') or elem.tag.endswith('pict'):
+                # 向上查找包含图片的段落
+                para_elem = elem.getparent()
+                while para_elem is not None and not para_elem.tag.endswith('p'):
+                    para_elem = para_elem.getparent()
+                if para_elem is not None:
+                    # 转换为Paragraph对象
+                    for para in doc.paragraphs:
+                        if para._p == para_elem:
+                            self._log(f"    ✅ 在XML中找到图片，对应段落")
+                            return para
+        
+        self._log("    ❌ 未找到任何图片！")
+        return None
+
+    def _add_image_annotations(self, doc, img_para):
+        """为图片添加标注：左上角+下方中间"""
+        try:
+            # 1. 图片左上角标注（试验结果图：）- 靠左对齐
+            top_para = doc.add_paragraph()
+            top_para.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+            top_run = top_para.add_run(self.img_label_top)
+            top_run.font.size = Pt(10)
+            top_run.font.name = "宋体"
+            # 插入到图片段落正上方
+            img_para._p.addprevious(top_para._p)
+            
+            # 2. 图片下方中间标注（水平极化）- 居中对齐
+            bottom_para = doc.add_paragraph()
+            bottom_para.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+            bottom_run = bottom_para.add_run(self.img_label_bottom)
+            bottom_run.font.size = Pt(10)
+            bottom_run.font.name = "宋体"
+            # 插入到图片段落正下方
+            img_para._p.addnext(bottom_para._p)
+            
+            self._log(f"  ✅ 图片标注完成：{self.img_label_top} + {self.img_label_bottom}")
+            return True
+        except Exception as e:
+            self._log(f"  ⚠️  图片标注失败：{str(e)}")
             return False
 
-        # 步骤2：删除图片上方所有内容
-        self.log("  ▶ 删除图片上方所有内容")
-        deleted_count = 0
-        # 从后往前删，避免索引错乱
-        for idx in range(image_idx - 1, -1, -1):
-            try:
-                doc._body._element.remove(doc._body._element[idx])
-                deleted_count += 1
-            except Exception as e:
-                self.log(f"  ⚠️  删除索引{idx}元素失败：{str(e)}")
-        self.log(f"  ✅ 已删除图片上方 {deleted_count} 个元素（文字/表格）")
-
-        # 步骤3：获取图片下方表格并删除原表格
-        table_elems = self.get_table_elements_below_image(doc, 0)  # 图片现在是第0个元素
-        
-        # 删除图片下方原表格
-        self.log("  ▶ 清理图片下方原表格")
-        body_elems = list(doc._body._element)
-        for idx in range(len(body_elems)-1, 0, -1):  # 从最后到图片（索引0）
-            elem = body_elems[idx]
-            if elem.tag.endswith('tbl'):
-                try:
-                    doc._body._element.remove(elem)
-                    self.log(f"  ✅ 删除图片下方原表格，索引：{idx}")
-                except:
-                    pass
-
-        # 步骤4：把表格插入到图片上方
-        if table_elems:
-            self.log("  ▶ 将表格移动到图片上方")
-            # 逆序插入（保持表格原有顺序）
-            for table_elem in reversed(table_elems):
-                doc._body._element.insert(0, table_elem)
-            self.log(f"  ✅ 成功移动 {len(table_elems)} 个表格到图片上方")
-
-        return True
-
-    # ========== 主流程：处理Word文件 ==========
-    def process_word(self):
-        """完整处理流程"""
-        # 输入校验
-        if not self.current_file or not os.path.exists(self.current_file):
-            messagebox.showerror("错误", "请选择有效的Word文件！")
-            return
-
-        # 1. 备份原文件
-        self.log("📦 开始备份原文件")
-        if self.tmp_dir is None:
-            self.tmp_dir = tempfile.mkdtemp(prefix="word_backup_387_")
-        self.backup_path = os.path.join(self.tmp_dir, os.path.basename(self.current_file))
-        shutil.copy2(self.current_file, self.backup_path)
-        self.log(f"✅ 原文件已备份至：{self.backup_path}")
-
-        # 2. 处理文档
+    def _clear_empty_paragraphs_above_table(self, doc, table):
+        """清除第一个表格上方的所有空段落，并确保表格距离文档顶部有2个空段落"""
         try:
-            doc = Document(self.current_file)
-            self.log(f"\n🔧 开始处理文件：{os.path.basename(self.current_file)}")
-
-            # 核心调整
-            adjust_success = self.adjust_word_content(doc)
-
-            if adjust_success:
-                # 保存处理后的文档
-                doc.save(self.current_file)
-                self.log(f"\n🎉 文档调整完成！")
-                messagebox.showinfo("成功", 
-                    f"✅ Word文件调整完成！\n📄 已执行：\n  1. 删除图片上方所有文字/表格\n  2. 将图片下方表格移动到图片上方\n✅ 保留：\n  1. 所有图片（含格式）\n  2. 表格原始格式")
-            else:
-                self.log(f"\n❌ 文档调整失败！")
-                messagebox.showerror("错误", "文档调整失败（未找到图片）！")
-                self.restore_original()
-
-        except Exception as e:
-            self.log(f"\n❌ 处理失败：{str(e)}")
-            messagebox.showerror("错误", f"文件处理失败：{str(e)}")
-            self.restore_original()
-
-    # ========== 恢复原文件 ==========
-    def restore_original(self):
-        """恢复备份的原文件"""
-        if not self.backup_path or not os.path.exists(self.backup_path):
-            messagebox.showinfo("提示", "暂无需要恢复的原文件！")
-            return
-
-        try:
-            # 覆盖恢复
-            shutil.copy2(self.backup_path, self.current_file)
+            # 获取表格对应的XML元素
+            table_elem = table._element
+            parent_elem = table_elem.getparent()
+            # 找到表格在父元素中的索引
+            table_index = list(parent_elem).index(table_elem)
             
-            # 清理临时目录
-            if self.tmp_dir and os.path.exists(self.tmp_dir):
-                shutil.rmtree(self.tmp_dir, ignore_errors=True)
-            self.tmp_dir = None
-            self.backup_path = ""
-
-            self.log(f"✅ 已恢复原文件：{os.path.basename(self.current_file)}")
-            messagebox.showinfo("恢复完成", f"✅ 原文件已成功恢复！")
-
+            # 步骤1：从表格上方开始向前遍历，清理所有空段落
+            removed_count = 0
+            for i in range(table_index - 1, -1, -1):
+                elem = parent_elem[i]
+                # 判断是否是空段落（无有效内容）
+                if elem.tag.endswith('p'):
+                    # 检查段落是否为空（无文字/仅空白符）
+                    para_text = ""
+                    for run in elem.xpath(".//w:t"):
+                        para_text += run.text or ""
+                    if not para_text.strip():
+                        # 删除空段落
+                        parent_elem.remove(elem)
+                        removed_count += 1
+                        # 移除后表格索引会变化，需要重新计算
+                        table_index = list(parent_elem).index(table_elem)
+            
+            if removed_count > 0:
+                self._log(f"  ✅ 清除表格上方空行数量：{removed_count}")
+            else:
+                self._log(f"  ℹ️  表格上方无空行需要清除")
+            
+            # 步骤2：确保表格顶部有且仅有2个空段落
+            # 重新获取清理后的表格索引
+            table_index = list(parent_elem).index(table_elem)
+            # 统计表格上方已有的非空段落数量（向上遍历直到文档顶部）
+            non_empty_above = 0
+            for i in range(table_index - 1, -1, -1):
+                elem = parent_elem[i]
+                if elem.tag.endswith('p'):
+                    # 检查是否为非空段落
+                    para_text = ""
+                    for run in elem.xpath(".//w:t"):
+                        para_text += run.text or ""
+                    if para_text.strip():
+                        non_empty_above += 1
+            
+            # 计算需要插入的空段落数量（目标：表格上方有2个空段落）
+            current_empty = table_index - non_empty_above
+            insert_count = self.table_top_spaces - current_empty
+            
+            if insert_count > 0:
+                # 倒序插入空段落（保证顺序正确）
+                for i in reversed(range(insert_count)):
+                    empty_para = parse_xml(f'<w:p {nsdecls("w")}/>')
+                    parent_elem.insert(table_index, empty_para)
+                self._log(f"  ✅ 插入{insert_count}个空段落，确保表格顶部有{self.table_top_spaces}个空行")
+            elif insert_count < 0:
+                # 理论上不会触发（已清理所有空段落），仅做兜底
+                self._log(f"  ℹ️  表格上方空行已超过{self.table_top_spaces}个，无需调整")
+            
+            return True
         except Exception as e:
-            self.log(f"❌ 恢复失败：{str(e)}")
-            messagebox.showerror("错误", f"恢复原文件失败：{str(e)}")
+            self._log(f"  ⚠️  清除/调整表格上方空行失败：{str(e)}")
+            return False
 
-# ========== 程序入口 ==========
+    def _process_single_file(self, file_path):
+        """处理单个docx文件"""
+        try:
+            file_name = os.path.basename(file_path)
+            self._log(f"\n===== 处理文件：{file_name} =====")
+            
+            # 1. 备份原文件（防止数据丢失）
+            backup_path = f"{file_path}.bak"
+            shutil.copy2(file_path, backup_path)
+            self._log(f"  📁 已备份原文件：{file_name}.bak")
+            
+            # 2. 打开文档
+            doc = Document(file_path)
+            self._log(f"  📄 文档段落数：{len(doc.paragraphs)} | 表格数：{len(doc.tables)}")
+            
+            # 3. 新增功能：删除页眉页脚所有内容
+            self._clear_header_footer(doc)
+            
+            # 4. 定位图片
+            img_para = self._find_first_image(doc)
+            
+            # 5. 核心：表格移至图片上方（无间隔行）+ 图片标注
+            table = doc.tables[0] if doc.tables else None
+            if table and img_para:
+                # 移除原表格，直接插入到图片上方（无间隔行）
+                table_elem = table._element
+                table_elem.getparent().remove(table_elem)
+                img_para._p.addprevious(table_elem)
+                self._log(f"  ✅ 表格已移至图片上方（无间隔行）")
+                # 添加图片标注
+                self._add_image_annotations(doc, img_para)
+            elif not table:
+                self._log("  ⚠️  无表格，仅处理图片标注")
+                if img_para:
+                    self._add_image_annotations(doc, img_para)
+            elif not img_para:
+                self._log("  ⚠️  未找到图片，跳过表格移动和标注")
+
+            # 6. 处理表格：清除表格上方空行并保证顶部2个空段落
+            table = doc.tables[0] if doc.tables else None
+            if table:
+                self._clear_empty_paragraphs_above_table(doc, table)
+            else:
+                self._log("  ⚠️  文档中无表格，跳过空行清理")
+            
+            # 7. 保存修改后的文档
+            doc.save(file_path)
+            self._log(f"  ✅ 文件处理完成：{file_name}")
+            return True
+        except Exception as e:
+            self._log(f"❌ 文件处理异常：{str(e)}")
+            import traceback
+            self._log(f"📝 详细错误：{traceback.format_exc()[:500]}")  # 限制错误日志长度
+            return False
+
+    def _batch_process(self):
+        """批量处理文件夹下所有docx文件"""
+        folder = self.folder_path.get()
+        if not folder or not os.path.isdir(folder):
+            messagebox.showerror("错误", "请选择有效的文件夹！")
+            return
+        
+        # 清空日志
+        self.log_text.delete(1.0, tk.END)
+        self._log("🚀 开始批量处理docx文件...")
+        self._log(f"📂 目标文件夹：{folder}")
+        
+        # 筛选所有docx文件
+        docx_files = [
+            os.path.join(folder, f) for f in os.listdir(folder)
+            if f.lower().endswith(".docx") and os.path.isfile(os.path.join(folder, f))
+        ]
+        
+        if not docx_files:
+            self._log("⚠️  未找到任何.docx文件！")
+            messagebox.showinfo("提示", "未找到任何.docx文件！")
+            return
+        
+        self._log(f"📊 共找到 {len(docx_files)} 个docx文件")
+        
+        # 批量处理
+        success_count = 0
+        fail_count = 0
+        for file_path in docx_files:
+            if self._process_single_file(file_path):
+                success_count += 1
+            else:
+                fail_count += 1
+        
+        # 处理完成统计
+        result_msg = f"\n✅ 批量处理完成！成功：{success_count}个 | 失败：{fail_count}个"
+        self._log(result_msg)
+        messagebox.showinfo("处理完成", result_msg)
+
 if __name__ == "__main__":
-    # 适配Windows高分屏
-    try:
-        from ctypes import windll
-        windll.shcore.SetProcessDpiAwareness(1)
-    except Exception as e:
-        print(f"DPI 适配提示：{e}（不影响运行）")
-
-    # 启动GUI
+    # 适配tkinter中文显示
     root = tk.Tk()
-    app = WordImageTableTool(root)
+    root.option_add("*Font", "SimHei 9")
+    # 启动主程序
+    app = DocxBatchTool(root)
     root.mainloop()
-
-    # 清理临时文件
-    try:
-        if app.tmp_dir and os.path.exists(app.tmp_dir):
-            shutil.rmtree(app.tmp_dir, ignore_errors=True)
-    except:
-        pass
